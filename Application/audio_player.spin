@@ -145,7 +145,9 @@ return @plAlbum
 PUB getGenre
 return @plGenre
 PUB changevol(newval) | i
-vol := (newval #> 0) <# 6
+i := newval + vol 
+
+vol := (i #> 0) <# 6
 
 PUB FileNotFound(fileptr)
 result := sd.popen(fileptr, "r")
@@ -199,17 +201,16 @@ ASMWAV
 
 setup
         'setup output pins
-        MOV DMaskR,#1
-        ROL DMaskR,OPinR
-        OR DIRA, DMaskR
-        MOV DMaskL,#1
-        ROL DMaskL,OPinL
-        OR DIRA, DMaskL
-        'setup counters
-        OR CountModeR,OPinR
-        MOV CTRA,CountModeR
-        OR CountModeL,OPinL
-        MOV CTRB,CountModeL
+        MOV DIRA, DMask
+        MOVS ctra, #5   'Set A PIN
+        MOVD ctra, #7   'Set B PIN
+
+        MOVS ctrb, #4    'Set A PIN  
+        MOVD ctrb, #6    'Set B pin
+
+        MOVI ctra, ctrmode
+        MOVI ctrb, ctrmode                
+
         'Wait for SPIN to fill table
         MOV WaitCount, CNT
         ADD WaitCount,BigWait
@@ -302,13 +303,21 @@ Zero    long 0
 fadeperiod     long 100_000
 fade    long  0         
 
+DMask   LONG %1111 << 4
+
+
 'setup parameters
 DMaskR  long 0 'right output mask
-OPinR   long 5 'right channel output pin #                        '   <---------  Change Right pin# here !!!!!!!!!!!!!!    
+OPinR   long 16 'right channel output pin #                        '   <---------  Change Right pin# here !!!!!!!!!!!!!!
+
+    
 DMaskL  long 0 'left output mask 
-OPinL   long 4 'left channel output pin #                         '   <---------  Change Left pin# here !!!!!!!!!!!!!!    
-CountModeR long %00011000_00000000_00000000_00000000
-CountModeL long %00011000_00000000_00000000_00000000
+OPinL   long 24 'left channel output pin #                         '   <---------  Change Left pin# here !!!!!!!!!!!!!!    
+
+'            31  ctr  pll       
+ CTRmode LONG %0_00111_000
+'CTRmode LONG %0_00110_000 Original
+
 
 
 'input parameters

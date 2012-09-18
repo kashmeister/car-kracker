@@ -1,5 +1,5 @@
 ''********************************************
-''*  Car Kracker Time Functions, V0.58       *
+''*  Car Kracker Time Functions, 1.0         *
 ''*  Author: Nick McClanahan (c) 2012        *
 ''*  See end of file for terms of use.       *
 ''********************************************
@@ -33,35 +33,6 @@ byte mastercog
 byte timestamprefresh
 
 
-{
-OBJ
-  debug        : "DebugTerminal.spin"
-
-
-PUB testrun | a, b, c, i, x, y, z, up
-debug.StartRxTx(31, 30, %0000, 115200)  
-start(12)
-z := 2
-synctime(@samplestamp2)
-oneshot(@z, (z :=0) +4 )
-oneshot(@x, (x :=0) + 7 )
-repeat
-  up := uptime
-  wait(50)
-  if up < uptime
-    debug.newline
-    debug.str(gettimestamp)
-
-  IF oneshot(@z,4)
-    debug.str(string("Triggered One shot z (10Sec) "))
-  IF oneshot(@x,0)
-    debug.str(string("Triggered One shot x no repeat "))
-
-}
-
-'If you call an unassigned alarm with a positive number, it won't work.
-'Call it with a negative id, first
-
 PUB start(hourstyle)
 mastercog := cogid
 BYTEfill(@epochdays, 0, 4)
@@ -81,6 +52,13 @@ refreshcheck
 
 
 PUB oneshot(valptr, delay) | i
+{{A oneshot timer.  Give the address where you want the timer to be stored and delay in seconds.
+  On the first call, make sure the value stored at your variable == 0.  Each call will return false until the timer expires.
+  Then, you'll get a single TRUE.  To reset the timer, call with a delay of 0.  
+}}
+
+ 
+
 'Call with delay = -1 to release timer
 'Call with delay => 0 to check / set timer
 
@@ -102,6 +80,9 @@ if delay => 0
     return TRUE
             '
 PUB GetTimestamp
+{{
+Text timestamp for ms since bootup.  The time is kept up-to-date by refreshcheck.  
+}}
 buildtimestamp
 return @timestamp
 
@@ -214,10 +195,6 @@ IF carsyncstatus
     IF ++carhours > 23
       carhours~   
  
-
-
-
-
 
 PRI StrToBase(stringptr, base) : value | chr, index
 {Converts a zero terminated string representation of a number to a value in the designated base.

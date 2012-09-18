@@ -1,11 +1,12 @@
 ''********************************************
-''*  Audio Core 1.0 (w/Kracker 0.57)         *
+''*  Audio Core 1.1                          *
 ''*  Author: Nick McClanahan (c) 2012        *
 ''*  See end of file for terms of use.       *
 ''********************************************
 {-----------------REVISION HISTORY-----------------
 1.1 - RIFF Support
-Now supports audio metadata in WAV files.  
+Now supports audio metadata in WAV files.
+Now supports SPDIF output (pin 14)
 
 1.0 - Initial Release
 }
@@ -145,9 +146,10 @@ return @plAlbum
 PUB getGenre
 return @plGenre
 PUB changevol(newval) | i
-i := newval + vol 
 
-vol := (i #> 0) <# 6
+newval #>= 0
+newval <#= 6
+vol := newval
 
 PUB FileNotFound(fileptr)
 result := sd.popen(fileptr, "r")

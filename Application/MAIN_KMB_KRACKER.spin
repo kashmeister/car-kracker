@@ -1,11 +1,14 @@
 ''********************************************
-''*  Car Kracker Main, V0.58                 *
+''*  Car Kracker Main, V0.59                 *
 ''*  Author: Nick McClanahan (c) 2012        *
 ''*  See end of file for terms of use.       *
 ''********************************************
 
 {-----------------REVISION HISTORY-----------------
   For complete usage and version history, see Release_Notes.txt
+0.59  Strings are now stored in upper EEPROM.  Kustomizer .59 will populate the strings, or use string_updater
+      Bugfixes on KbusCore, Padding now works
+      New Time engine 
 
 0.58  Added WAV Riff tag support
       Added DSP support (set in Kustomizer)
@@ -55,13 +58,13 @@ Removed: Nothing
 For Previous Releases, see Release_Notes.txt
 }
 DAT
-Version  BYTE "Version",13,"0.59",13,0 
-version2 BYTE 16,"Kracker V 0.59, ",0
+Version  BYTE "V",13,"0.59",13,0 
+version2 BYTE 16,"Kracker V 0.59",0
 
 CON
   _clkmode = xtal1 + pll16x                             ' Crystal and PLL settings.
   _xinfreq = 5_000_000                                  ' 5 MHz crystal (5 MHz x 16 = 80 MHz).
-  Menudelay = 5
+  Menudelay = 3
 
   EEPROM_Addr   = %1010_0000   
   EEPROM_base   = $8000
@@ -88,7 +91,7 @@ LONG stack[25]
 LONG stack2[20]
 
 'Variables for Config Mode
-BYTE configbuffer[20]
+BYTE configbuffer[64]
 BYTE controltype[20]
 BYTE getorset[5]
 BYTE bussendvalue[20]
@@ -122,12 +125,15 @@ byte hexstyle
 
 byte KMBreturn[16] 'For parsing KMB strings 
 
+ 
 
 PUB Initialize
 'We use this method to dump running the main process in Cog 0
+ActiveDebugFilters := 0                                 
 coginit(maincog, main, stack_base)
 coginit(LEDcog, LEDnotifier, @stack)
-debug.StartRxTx(31, 30, %0000, 115200)
+debug.StartRxTx(31, 30, %0000, 115_200)
+ 
 cogstop(0)
 
 
@@ -136,17 +142,14 @@ i2cObject.Init(29, 28, false)
 kbus.Start(27, 26, %0010, 9600)
 
 'Make sure debug filters are clear
-ActiveDebugFilters := 0                                 
-setled(1)
+
 delay := 0
 
-
 IF EEPROM_read(101) <> 0
-  debug.str(@version2)
   debug.str(string("Hit d key for debug",13))
 
-
 repeat until time.oneshot(@delay, 5)
+  setled(1)
   c := debug.rxcheck
   if c == "C" 
     configmode
@@ -214,6 +217,9 @@ repeat
 
   IF strcomp(@configbuffer, @sermon)
     serialmonitormode
+
+  IF strcomp(@configbuffer, @loadstrings)
+    loadtextstrings
     
   IF strcomp(@configbuffer, @combobox) 
     eepromoffset := 100 + debug.decin
@@ -234,7 +240,57 @@ testcmd       BYTE "TestCmd",0
 sersend       Byte "sersend",0
 serdone       Byte "serdone",0
 default       Byte "default",0
-modesel       BYTE "m",0    
+modesel       BYTE "m",0
+loadstrings   BYTE "loadstrings",0   
+        
+
+
+PUB loadtextstrings | i, x, y, strstart, offset, strlen, strcnt
+
+strstart := 600    
+offset := 400
+strcnt := 0
+
+repeat
+  debug.dec(strcnt)
+  debug.newline
+  debug.strin(@configbuffer)
+  if configbuffer == "e"
+    debug.str(string("Loaded "))
+    debug.dec((offset - 400) / 2)
+    debug.str(string(" Strings",13))
+    return
+  EEPROM_set(offset,strstart.byte[0])   'Store the start address to the string
+  EEPROM_set(offset+1,strstart.byte[1])
+  strlen := strsize(@configbuffer) 
+  repeat i from 0 to strlen
+    IF configbuffer[i] == "~"
+      configbuffer[i] := 13        
+    EEPROM_set(strstart,configbuffer[i])
+    strstart++
+  strstart++
+  strcnt++     
+  offset += 2
+
+PUB gettextstring(offset)| i, x, y, returnptr
+y~
+i~
+returnptr := @configbuffer
+
+
+Offset := offset * 2 + 400
+
+i.byte[0] := EEPROM_Read(offset)
+i.byte[1] := EEPROM_Read(offset + 1)
+
+BYTE[returnptr] := EEPROM_Read(i)
+
+repeat while BYTE[returnptr] > 0
+   BYTE[++returnptr] :=  EEPROM_read(++i)
+ 
+BYTE[returnptr] := 0
+return @configbuffer
+  
 
 
 pri eepromreset | i
@@ -242,7 +298,7 @@ repeat i from 0 to 400
   eeprom_set(i, 255)
   
 Pri getseteeprom(eepromoffset)
-
+setLED(99) 
 debug.strin(@getorset)
   IF strcomp(@getorset, @set)
     EEPROM_set(eepromoffset,debug.decin)
@@ -251,15 +307,15 @@ debug.strin(@getorset)
 
 Pri EEPROM_set(addr,byteval)
 setLED(99)
-waitcnt(cnt + 100_000)
 i2cObject.writeLocation(EEPROM_ADDR, addr+EEPROM_base, byteval, 16, 8)
-waitcnt(cnt + 200_000) 
+waitcnt(cnt + 200000)
 
 Pri EEPROM_Read(addr) | eepromdata
 setLED(199)
-eepromdata := 0
 
+eepromdata := 0
 eepromdata := i2cObject.readLocation(EEPROM_ADDR, addr+EEPROM_base, 16, 8)
+'waitcnt(cnt + 20000) 
 return eepromdata
 
 Pri sendsetting(addr,len) |  i
@@ -274,8 +330,8 @@ debug.newline
 
 PUB datalogmode     | i,repeattimer, repeatlimit, nextupdate, lastupdate
 
-
-debug.str(string(16,"Entering:Data Log Mode",13)) 
+debug.clear
+debug.str(gettextstring(21))
 BYTEfill(@configbuffer,0,20)
 i := EEPROM_read(199)
 repeattimer := 0
@@ -340,7 +396,7 @@ IF newval > -1
   debug.newline
 
 PRI csvheader
-debug.str(string("Writing logfile Header",13))
+debug.str(gettextstring(22))
 sd.popen(@logfilename, "a")    
 
 IF EEPROM_Read(201) <> 0   ' speed
@@ -396,7 +452,7 @@ sd.pclose
 
 
 Pri writetolog  
-debug.str(string("Writing logfile Entry",13))
+debug.str(gettextstring(23))
 setled(99)
 
 BYTEfill(@configbuffer,0,20)
@@ -564,7 +620,8 @@ CMDLIST  WORD   @volup,      @voldown,     @whlplus,     @whlmin,      @RTButton
 
 
 PUB connectionTestMode
-debug.str(string(16,"Entering: Connection Test Mode",13))
+debug.clear
+debug.str(gettextstring(24))
 
 repeat
   SetLED(100)
@@ -573,29 +630,6 @@ repeat
 
 
 DAT 'Music and Radio messages
-
-outputdebuglist WORD @musicdebug0,  @musicdebug1,  @musicdebug2,  @musicdebug3,  @musicdebug4
-                WORD @musicdebug5,  @musicdebug5,  @musicdebug5,  @musicdebug5,  @musicdebug5,  @musicdebug5
-                WORD @musicdebug11, @musicdebug12, @musicdebug13, @musicdebug14, @musicdebug15, @musicdebug16, @musicdebug17, @musicdebug18, @musicdebug19, @musicdebug20, @musicdebug21   
-
-musicdebug0   BYTE "Not Found - Nothing"       ,0
-musicdebug1   BYTE "Prev Track"                ,0
-musicdebug2   BYTE "Next Track"                ,0
-musicdebug3   BYTE "Prev CD"                   ,0
-musicdebug4   BYTE "Next CD"                   ,0
-musicdebug5   BYTE "Change CD to #",0
-musicdebug11  BYTE "Change Aux"                ,0
-musicdebug12  BYTE "Time Text"                 ,0
-musicdebug13  BYTE "Fuel Text"                 ,0
-musicdebug14  BYTE "Range Text"                ,0
-musicdebug15  BYTE "Date Text"                 ,0
-musicdebug16  BYTE "(Kracker Vol+)"            ,0
-musicdebug17  BYTE "(Kracker Vol-)"            ,0
-musicdebug18  BYTE "Artist Name"               ,0
-musicdebug19  BYTE "Album Name"                ,0 
-musicdebug20  BYTE "Track Name"                ,0 
-musicdebug21  BYTE "Genre"                     ,0   
-              
 
 'RADIO BUTTONS
          CDCHG       BYTE $68, $05, $00, $38, $06
@@ -612,9 +646,6 @@ musicdebug21  BYTE "Genre"                     ,0
         CDannounce    BYTE $18, $04, $FF, $02, $01
         CDrespond     BYTE $18, $04, $FF, $02, $00
 
-
-
-
 'radio button remap fields
 radbutlist    BYTE 134,135,136,137,138,139,140,141, 142, 143, 111, 144
 '                  CD1                 CD6 T-  T+   vol  Aux, RND, dsp
@@ -624,18 +655,18 @@ radbutlist    BYTE 134,135,136,137,138,139,140,141, 142, 143, 111, 144
 
 PUB MUSICMODE     | i, d, volset , len, cdtype, delay, randctr, remap
 debug.str(@version2) 
-debug.str(string("Entering Music Mode",13))
-debug.str(string("To filter bus messages enter ",13))
-debug.str(string("'s' + addr to view messages sent BY addr",13))
-debug.str(string("'d' + addr to view messages sent TO addr",13))
-debug.str(string("'r' to remove most recently set filter.  Up to five active filters ' ",13))   
+debug.str(gettextstring(56))
+debug.str(gettextstring(57))
+debug.str(gettextstring(58))
+debug.str(gettextstring(59))    
+debug.str(gettextstring(60))
 updatestat~
 randctr~
 delay~
 
           
 volset :=  EEPROM_read(byte[@radbutlist][8])                 ''Load Stored Preferences - dropdowns and Volume
-debug.str(string("Volume Set: "))
+debug.str(gettextstring(47))
 debug.dec(volset)
 debug.newline
 remapTel := 3 
@@ -646,26 +677,26 @@ repeat i from 0 to 7
 ''Check Stored Preference for AuxIn Only 
 IF EEPROM_read(byte[@radbutlist][9]) == 1
   music.AuxIn
-  debug.str(string("Entered AuxIn Only Mode",13))
+  debug.str(gettextstring(46))
 ELSE
   if \music.start(volset, EEPROM_read(144))
-    debug.str(string("Couldn't mount SD card!!!",13))
+    debug.str(gettextstring(18))
     repeat 
       setLED(201)   
       waitcnt(clkfreq + cnt)
-      debug.str(string("Couldn't mount SD card!!!",13))
+      debug.str(gettextstring(18))
 
 
 IF EEPROM_read(109) == 1
   remap := TRUE
   remappersetup  
-  debug.str(string("Running with Remapper",13))
+  debug.str(gettextstring(48))
 ELSE
   remap := FALSE
-  debug.str(string("Remaper disabled",13))
+  debug.str(gettextstring(49))
 
 kbus.sendcode(@CDAnnounce)
-debug.str(string("Nothing, CD Announce",13))
+debug.str(gettextstring(50))
 
 
 repeat
@@ -676,18 +707,18 @@ repeat
     IF kbus.codecompare(@pollCD)
        kbus.sendcode(@CDRespond)
        repeat until NOT kbus.txcheck
-       displaybuffercode(@CDrespond)  
-       debug.str(string("(CD Polled,Responded)"))
+       displaybuffercode(@CDrespond)
+       debug.str(gettextstring(51))  
        next
 
     IF kbus.codecompare(@IKEoff)
-       debug.str(string("(PowerDown,Stopped)"))
+       debug.str(gettextstring(52)) 
        remapTel := 0    
        music.stopplaying  
        next
 
     If kbus.codecompare(@IKEon)
-       debug.str(string("(PowerUp,Stopped)"))
+       debug.str(gettextstring(53)) 
        next
      
     IF kbus.codecompare(@cdstatusreq)
@@ -752,7 +783,10 @@ repeat
 
 
 Pri musiccmd(selectedaction)    | i , x
-debug.str(@@outputdebuglist[selectedaction])
+Case selectedaction
+   0..4  :   debug.str(gettextstring(selectedaction + 25)) 
+   5..10 :   debug.str(gettextstring(30))
+  10..25 :   debug.str(gettextstring(selectedaction + 20)) 
 
 case selectedaction
   1 : music.playtrack("c", "p")
@@ -768,21 +802,20 @@ case selectedaction
 
   5..10 :  music.playtrack(selectedaction -4, 1)
            debug.dec(selectedaction - 4)
-           debug.newline 
            kbus.sendcode(music.StartPlayCode)
            displaybuffercode(music.StartPlayCode)     
 
   11 :                 
-    IF music.AuxIn
+    IF music.AuxIn                                    'str 36
        settext(string("Aux On"))
     ELSE
       settext(string("Aux Off"))
 
   12 : kbus.localtime(@configbuffer)                    'local time
-       settext(@configbuffer)
+       settext(@configbuffer)        
        setupdate(selectedaction)
 
-  13 : kbus.fuelaverage(@configbuffer)                  'AVG fuel
+  13 : kbus.fuelaverage(@configbuffer)                  'AVG fuel str 38
        i := strsize(@configbuffer) 
        Bytemove(@configbuffer + i, @mpgsuffix, 5)
        settext(@configbuffer)
@@ -799,10 +832,10 @@ case selectedaction
        setupdate(selectedaction)
       
   16 : settext(string("K vol+"))
-       music.changevol(-1)
+       music.changevol("p")
 
   17 : settext(string("K vol-"))
-       music.changevol(+1)      
+       music.changevol("m")      
 
   18 : settext(music.artist)
        setupdate(selectedaction)
@@ -837,7 +870,7 @@ repeat
 
 PUB SERIALREPEATMODE  | i
 debug.str(@version2)
-debug.str(string("Entering:Repeat Mode",13)) 
+debug.str(gettextstring(54))
 setLED(205) 
 
 repeat
@@ -851,7 +884,7 @@ repeat
 PUB REMAPPERMODE   | i,x,y, xmit 
 setLED(-1)
 debug.str(@version2)
-debug.str(string("Entering:Remapper Mode",13))  
+debug.str(gettextstring(55))
 remappersetup
 
 
@@ -874,7 +907,7 @@ repeat i from 0 to 5
 
 
 
-pri remapcheck | y
+pri remapcheck | y, delay
 
 
 IF kbus.codecompare(@RTButton)   
@@ -885,12 +918,14 @@ IF kbus.codecompare(@RTButton)
 repeat y from 0 to 5                              
   IF triggeritems[y] < 250  
     IF kbus.codecompare(@@maptrg[triggeritems[y]-1]) 'triggeritems[y] is the dropdown value.  First dropdown field value is 'none' = 0
-       debug.str(string("REMAP,"))  
+       kbus.sendcode(@@mapxmit[xmititems[y]-1])       
+       displaybuffercode(@@mapxmit[xmititems[y]-1])
+       debug.str(string(" REMAP,"))  
        debug.char(triggeritems[y] + $30)
        debug.str(string(","))
-       kbus.sendcode(@@mapxmit[xmititems[y]-1])  
        debug.char(xmititems[y] + $30)
-       debug.newline
+
+
   
 DAT ' Remaps 
 '                 0x10           1x10          2x10         3x10           4x10         5x10         6x10           7x10          8x10          9x10
@@ -931,18 +966,19 @@ dira[23..16] := %1111_1111
 
 repeat
   time.wait(50)
+{
   IF time.oneshot(@delay, 5)
     IF kbus.localtime(@kmbreturn)
       debug.str(@kmbreturn)
       debug.newline
       time.synctime(@kmbreturn)
       delay~~
-
+}
   IF LEDtext
      textscroll(LEDtext~)
 
-  case LEDctrl~
-     -1: outa[23..16]~
+  case ~LEDctrl
+     -1: outa[23..16] := %0000_0000
      1 : outa[23..16] := %0110_0000
      2 : outa[23..16] := %1001_0000
     99,100  :
@@ -956,7 +992,8 @@ repeat
            repeat 7                     
              time.wait(30) 
              outa[23..16] <-= 1         
-         outa[23..16]~
+         outa[23..16] := %0000_0000
+         LEDctrl~ 
     201 :
            outa[23..16] := %1010_1010
            repeat 4
@@ -964,10 +1001,11 @@ repeat
               outa[23..16] ->= 1
               time.wait(166)
               outa[23..16] <-= 1
-           outa[23..16]~
+           outa[23..16] := %0000_0000
+           LEDctrl~
 
     199,200 :
-      outa[23..16] := 1  
+      outa[23..16] := %0000_0001  
               time.wait(30)                       
               repeat 7                                         
                 time.wait(30)                    
@@ -978,7 +1016,8 @@ repeat
                 repeat 7                     
                   time.wait(30) 
                   outa[23..16] ->= 1         
-              outa[23..16]~
+              outa[23..16] := %0000_0000
+              LEDCTRL~
 
     23..20 :  outa[23..20]~
               outa[ledctrl]~~  
@@ -1072,6 +1111,10 @@ If debug.rxcount > 2
            debug.str(string(13,"OK: Removed Filter on address "))
            debug.hex(debugfilterIDs[activedebugfilters--],2)
            debug.newline
+    "e"    : debug.clear
+             reboot
+
+
     OTHER  : debug.str(string(13,"Command not recognized",13))
 
 
@@ -1113,7 +1156,12 @@ waitcnt(clkfreq  / 800 + cnt)
 repeat until debug.rxcheck  == -1
 
 repeat
-  debug.str(@debugmenu)
+  debug.str(gettextstring(1))
+  debug.str(gettextstring(2))
+  debug.str(gettextstring(3))
+  debug.str(gettextstring(4))
+  debug.str(gettextstring(5))
+  debug.str(gettextstring(6))          
    case debug.decin
     0 : DiagnosticMode
     1 : MusicMode
@@ -1126,68 +1174,84 @@ repeat
     8 : loopAudio
     9 : loopRadiotxt
     10 :loopeeprom
-    11 : debugkmb
+    11 :loopdebugstrings  
+    12 : debugkmb
   waitcnt(clkfreq / 2 + cnt)
 
-DAT 'Debug Menu Text
-debugmenu     BYTE      16,"DEBUG MENU",13
-              BYTE      "Main Modes:",13
-              BYTE      "  0: Diagnostic",13
-              BYTE      "  1: Music",13
-              BYTE      "  2: SerialRepeat",13
-              BYTE      "  3: Remapper",13
-              BYTE      "  4: DataLog",13
-              BYTE      "Test Modes: (e to escape test)",13
-              BYTE      "  5: Hex Bus Sniffer",13
-              BYTE      "  6: CMD Blast, Bus Watch",13
-              BYTE      "  7: CMD Blast, Single",13
-              BYTE      "  8: Audio Player",13
-              BYTE      "  9: Write text to Radio/NAV",13
-              BYTE      " 10: Read EEPROM",13 
-              BYTE      " 11: Read KMB values",13,0
+PUB loopdebugstrings | i, x, y, strstart, offset, strcnt, strlen
+strstart := 600    
+offset := 400
+strcnt := 0
 
-kmbmenu       BYTE      16,"Read KMB",13
-              BYTE      "  0: Return to Main Debug",13
-              BYTE      "  1: Read Time, Parsed",13
-              BYTE      "  2: Read Date, Parsed",13
-              BYTE      "  3: Read Fuel, Parsed",13
-              BYTE      "  4: Read Range, Parsed",13                            
-              BYTE      "  5: Check sync'ed time",13,0
+repeat
+  debug.str(string(16,"(e)nter Strings, (r)ead String, or (q)uit: "))
+  y := debug.charin 
+  IF y == "q"
+    return
+  ELSEIF y == "e"
+    repeat
+      debug.str(string(13,"Enter String: "))  
+      debug.strin(@configbuffer)
+      if configbuffer == 0
+        return
+      EEPROM_set(offset,strstart.byte[0])   'Store the start address to the string
+      EEPROM_set(offset+1,strstart.byte[1])
+      strlen := strsize(@configbuffer) 
+      repeat i from 0 to strlen
+        EEPROM_set(strstart,configbuffer[i]) 
+        strstart++
+      strstart++      
+      offset += 2
+  ELSEIF y == "r"
+    debug.str(string(13,"Read String offset: "))
+    y := debug.decin
+    Offset += y * 2
+    i~
+    i.byte[0] := EEPROM_Read(offset)
+    i.byte[1] := EEPROM_Read(offset + 1)
+    x := EEPROM_Read(i)
+    repeat while x > 0
+      debug.char(x)
+      x := EEPROM_read(++i)
+    waitcnt(clkfreq * 2 + cnt)
+    return
+      
+    
 
-eeprom1       BYTE      16,"(r)ead, (w)rite, or (e)xit?",13,0
-eeprom2       BYTE      "Enter Address(0-500)",0
-eeprom3       BYTE      " Has Value: ",0
-eeprom4       BYTE      " Enter new value: ",0
-eeprom5       BYTE      " Done",13,0
 
 PUB loopeeprom | i, x
-debug.str(@eeprom1) 
+debug.clear
+debug.str(gettextstring(10))  
 repeat
   debug.newline
   case debug.charin
     "e": return
-    "r":   debug.str(@eeprom2)
+    "r":   debug.str(gettextstring(11))
            i := debug.decin
            debug.positionx(0)
            debug.clearend
            debug.dec(i)
-           debug.str(@eeprom3)            
+           debug.str(gettextstring(12))            
            debug.dec(EEPROM_read(i))
            next
-    "w":   debug.str(@eeprom2)
+    "w":   debug.str(gettextstring(11))
            i := debug.decin
            debug.dec(i)
-           debug.str(@eeprom4)
+           debug.str(gettextstring(13))
            x := debug.decin            
            EEPROM_set(i, x)
            debug.dec(x)
-           debug.str(@eeprom5)
+           debug.str(gettextstring(14))
            next                                             
 
 
 PUB debugkmb  | i
 repeat
-  debug.str(@kmbmenu)
+  debug.clear
+  debug.str(gettextstring(7))
+  debug.str(gettextstring(8))
+  debug.str(gettextstring(9))     
+    
   i := debug.decin 
   case i
     0 : return
@@ -1199,19 +1263,21 @@ repeat
         debug.str(@configbuffer)
     4 : kbus.estrange(@configbuffer)
         debug.str(@configbuffer)
-{{    5 :    debug.str(time.gettimetext)
-           debug.newline                    
-           Else
-            debug.str(string("Time not synced",13))    }}            
+    5 : If time.carissynced
+          debug.str(time.gettimetext)
+          debug.newline                    
+        Else
+          debug.str(string("Time not synced",13))               
   waitcnt(clkfreq + cnt)
 
 
 PUB loopaudio | i
-  debug.clear
-  debug.str(string("w=CD Up, s=CD Down d=Track+, a=Track- 1=vol-, 2=vol+, q=stop Track, r=Aux Mode",13))
-  debug.str(string("3=Artist, 4= Album, 5=Track, 6=Genre",13))
+debug.clear
+debug.str(gettextstring(15))
+debug.str(gettextstring(16))
+debug.str(gettextstring(17))
 if \music.start(1, 0)                                                         
-  debug.str(string("Couldn't mount SD card!!!",13))
+  debug.str(gettextstring(18))
   repeat 
     setLED(201)   
     waitcnt(clkfreq / 3 + cnt)
@@ -1255,8 +1321,9 @@ debug.newline
       
 PUB loopradiotxt
 repeat
-  debug.str(string(16,"Enter String and press enter to write text to radio display",13))
-  debug.str(string("Or hit enter to go back",13))
+  debug.clear
+  debug.str(gettextstring(19))
+  debug.str(gettextstring(20))
   debug.StrIn(@configbuffer)
   if configbuffer == 0
     return
@@ -1396,17 +1463,6 @@ DAT
 
 'datalog mode   
 logfilesuffix BYTE ".csv",0
-
-
-
-
-
-
-
-
-
-
-
 mpgsuffix     BYTE " mpg",0
 milessuffix   BYTE " Miles",0
 

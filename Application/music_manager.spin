@@ -1,9 +1,11 @@
 ''********************************************
-''*  Music Manager 1.1                       *
+''*  Music Manager 1.2                       *
 ''*  Author: Nick McClanahan (c) 2012        *
 ''*  See end of file for terms of use.       *
 ''********************************************
 {-----------------REVISION HISTORY-----------------
+1.2 - Fixed Next / Previous track bug
+
 1.1 - RIFF support
 Audio_Player now supports RIFF (Audio file metadata).  
 
@@ -130,9 +132,13 @@ ELSE
 
 PUB changevol(newval)
 CASE newval
- "p" : newval := --volumeset
- "m" : newval := ++volumeset 
-volumeset := (newval #> 0) <# 6
+ "p"   : --volumeset
+ "m"   : ++volumeset 
+ other : volumeset := newval
+
+volumeset #>= 0
+volumeset <#= 6
+
 player.changevol(volumeset)
 
 return TRUE

@@ -22,18 +22,20 @@ LONG totalseconds
 
 WORD Carhours
 WORD Carminutes
+WORD carseconds
+
 LONG carsyncstatus
 
 byte timestamp[11]
 byte timetxtstamp[11]
-byte hrdisplay
+
 byte mastercog
 
 'Will hold the minute the textstamp was last refreshed 
 byte timestamprefresh
 
 
-PUB start(hourstyle)
+PUB start
 mastercog := cogid
 BYTEfill(@epochdays, 0, 4)
 epochms~
@@ -41,14 +43,17 @@ totalseconds~
 timestamprefresh~
 carsyncstatus~
 
-hrdisplay := FALSE
-IF hourstyle == 12
-  hrdisplay := TRUE
 
 ctra := %00110_000 << 23 + 31 << 9 + 31 'Establish mode duty
 frqa := multiplier 
 systemtimer := 0
 refreshcheck
+
+PUB carhrs
+return carhours
+
+PUB carmins
+return carminutes
 
 
 PUB oneshot(valptr, delay) | i
@@ -86,10 +91,10 @@ Text timestamp for ms since bootup.  The time is kept up-to-date by refreshcheck
 buildtimestamp
 return @timestamp
 
-PUB GetTimeText
-'buildtimetext
-'return @timetxtstamp
-return @samplestamp  
+PUB GetTimeText(showsecs, display)
+buildtimetext(showsecs, display)
+return @timetxtstamp
+  
 
 
 pri buildtimestamp | i
@@ -120,15 +125,16 @@ i := 0
  
 
 
-pri buildtimetext | i, x
+pri buildtimetext(showsecs, hrdisplay) | i, x
+
+x := carhours
 
 IF hrdisplay
   if carhours == 0
     x := 12
-  if carhours > 12
+  ELSEIF carhours > 12
     x -= 12
-ELSE
-  x := carhours
+  
 
 i :=decimaltostring(x,@timetxtstamp) + @timetxtstamp
 BYTE[i++] := ":"
@@ -136,12 +142,21 @@ if carminutes < 10
   BYTE[i++] := "0"
 
 i += decimaltostring(carminutes,i)
+
+IF showsecs
+  BYTE[i++] := ":"
+  if carseconds < 10
+    BYTE[i++] := "0"
+  i += decimaltostring(carseconds,i)  
+
 IF hrdisplay
   IF carhours > 11
     BYTE[i++] := "P"
   ELSE
     BYTE[i++] := "A"        
   BYTE[i++] := "M"    
+
+
 
 BYTE[i++] := 0
 
@@ -177,9 +192,9 @@ repeat while systemtimer > 80000
   IF ++epochms >  999
     epochms~
     ++totalseconds
+    updatecartime
     IF ++epochs > 59
       epochs~
-      updatecarminute
       IF ++epochmin > 59
         epochmin~
         IF ++epochhours > 23
@@ -187,13 +202,15 @@ repeat while systemtimer > 80000
           ++epochdays
 return TRUE
 
-PRI updatecarminute
+PRI updatecartime
 {{ Update our copy of the car's time when with each new minute}}
 IF carsyncstatus
-  IF ++carminutes > 59
-    carminutes~
-    IF ++carhours > 23
-      carhours~   
+  IF ++carseconds > 59
+    carseconds~
+    IF ++carminutes > 59
+      carminutes~
+      IF ++carhours > 23
+        carhours~   
  
 
 PRI StrToBase(stringptr, base) : value | chr, index
@@ -241,22 +258,18 @@ PUB Synctime(strptr) | i, strlen
 carhours := 0
 strlen := strsize(strptr)
 
-{{
 if strlen == 0
   return -10
 carsyncstatus := TRUE
-
-carhours := 8
-carminutes := 14
-
+carseconds := 3
 
 repeat i from 0 to strlen
   IF BYTE[strptr+i] == ":"
      carminutes := ((BYTE[strptr + i+1] -$30) * 10)
-'     carminutes += BYTE[strptr + i+2] -$30) 
-     carhours :=  (BYTE[strptr + i-1] -$30)   
-'   IF BYTE[strptr + i-2] == $31
-'    carhours += 10
+     carminutes += BYTE[strptr + i+2] -$30 
+     carhours :=  BYTE[strptr + i-1] -$30   
+     IF BYTE[strptr + i-2] == $31
+      carhours += 10
 
   IF (BYTE[strptr+i] == "A") OR (BYTE[strptr+i] == "a")     
     IF carhours-- == 12
@@ -265,9 +278,3 @@ repeat i from 0 to strlen
   IF (BYTE[strptr+i] == "P") OR (BYTE[strptr+i] == "p")
     IF (carhours += 12) == 24
       carhours :=  12
-}}
-
-DAT
-samplestamp  BYTE "11:57PM",0
-samplestamp3 BYTE "11:55PM",0    
-samplestamp2 BYTE "11:55PM",0

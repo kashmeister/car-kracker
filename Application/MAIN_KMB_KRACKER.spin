@@ -1,11 +1,13 @@
 ''********************************************
-''*  Car Kracker Main, V0.59                 *
+''*  Car Kracker Main, V0.60                 *
 ''*  Author: Nick McClanahan (c) 2012        *
 ''*  See end of file for terms of use.       *
 ''********************************************
 
 {-----------------REVISION HISTORY-----------------
   For complete usage and version history, see Release_Notes.txt
+0.60  Strings moved back to program memory.  Added differential audio
+
 0.59  Strings are now stored in upper EEPROM.  Kustomizer .59 will populate the strings, or use string_updater
       Bugfixes on KbusCore, Padding now works
       New Time engine 
@@ -58,8 +60,8 @@ Removed: Nothing
 For Previous Releases, see Release_Notes.txt
 }
 DAT
-Version  BYTE "V",13,"0.59",13,0 
-version2 BYTE 16,"Kracker V 0.59",0
+Version  BYTE "V",13,"0.60",13,0 
+version2 BYTE 16,"Kracker V 0.60",0
 
 CON
   _clkmode = xtal1 + pll16x                             ' Crystal and PLL settings.
@@ -71,7 +73,12 @@ CON
   stack_base    = $7500
 
   RADsize       = 11 
-  maincog =  4, LEDcog = 2  
+  maincog =  4, LEDcog = 2
+
+'MCP3204 pinout; P8 = Clk p9 = Dio, P10 = ChipS
+'adc.start(9,8,10,0) ch 0 = lchan, ch 1 = rchan
+
+    
 'Cogs are custom mapped to reduce jitter - COG 0 goes with audio.  Definitions:
 'COG7: Touch / SD __COG6: Kbus RX  __Cog 5: Debug Console  __Cog 4: Main Thread  __Cog 3: Audio Buffer __Cog 2: LED notifier __Cog 0: Audio
 
@@ -82,7 +89,8 @@ OBJ
   music        : "music_manager"
   i2cObject    : "i2cObject.spin"
   SD           : "FSRW"
-  time         : "time.spin"  
+  time         : "time.spin"
+' adc: "MCP3208_fast.spin"  
   
 VAR
 'LED Notifier
@@ -115,6 +123,7 @@ BYTE playerstatus
 BYTE textfield
 LONG updatestat       ' 
 WORD LEDtext          'Address for the text to be displayed
+BYTE displayrefresh
 
 'filter values for buffer display
 byte activedebugfilters
@@ -124,12 +133,13 @@ byte debugfilterType[5]
 byte hexstyle
 
 byte KMBreturn[16] 'For parsing KMB strings 
-
+byte KMBreturn2[16]
  
 
 PUB Initialize
 'We use this method to dump running the main process in Cog 0
 ActiveDebugFilters := 0                                 
+kbus.Start(27, 26, %0010, 9600)
 coginit(maincog, main, stack_base)
 coginit(LEDcog, LEDnotifier, @stack)
 debug.StartRxTx(31, 30, %0000, 115_200)
@@ -139,10 +149,8 @@ cogstop(0)
 
 PUB main | i, c, delay
 i2cObject.Init(29, 28, false)
-kbus.Start(27, 26, %0010, 9600)
 
 'Make sure debug filters are clear
-
 delay := 0
 
 IF EEPROM_read(101) <> 0
@@ -272,7 +280,7 @@ repeat
   strcnt++     
   offset += 2
 
-PUB gettextstring(offset)| i, x, y, returnptr
+PUB gettexteeprom(offset)| i, x, y, returnptr
 y~
 i~
 returnptr := @configbuffer
@@ -290,6 +298,85 @@ repeat while BYTE[returnptr] > 0
  
 BYTE[returnptr] := 0
 return @configbuffer
+
+
+PUB gettextstring(offset)| strptr, strlen, i
+  strptr := @@strings[offset]
+  return strptr 
+
+
+
+
+DAT
+strings WORD @str00, @str01, @str02, @str03, @str04, @str05, @str06, @str07, @str08, @str09, @str10, @str11, @str12
+        WORD @str13, @str14, @str15, @str16, @str17, @str18, @str19, @str20, @str21, @str22, @str23, @str24, @str25
+        WORD @str26, @str27, @str28, @str29, @str30, @str31, @str32, @str33, @str34, @str35, @str36, @str37, @str38
+        WORD @str39, @str40, @str41, @str42, @str43, @str44, @str45, @str46, @str47, @str48, @str49, @str50, @str51
+        WORD @str52, @str53, @str54, @str55, @str56, @str57, @str58, @str59, @str60 
+
+
+str00 BYTE "Hit d key for debug",0
+str01 BYTE 13,"DEBUG MENU",13,"Main Modes:",13," 0: Diagnostic",13,0
+str02 BYTE " 1: Music",13," 2: SerialRepeat",13," 3: Remapper",13," 4: DataLog",13,"Test",0
+str03 BYTE "Modes: (e to escape test)",13," 5: Hex Bus Sniffer",13," 6: CMD B",0
+str04 BYTE "last Bus Watch",13," 7: CMD Blast Single",13," 8: Audio Player",13," 9",0
+str05 BYTE ": Write text to Radio/NAV",13," 10: Read EEPROM",13," 11: Read E",0
+str06 BYTE "EPROM strings",13," 12: Read KMB values",13,0
+str07 BYTE "Read KMB",13," 0: Return to Main Debug",13," 1: Read Time Parsed",0
+str08 BYTE 13," 2: Read Date Parsed",13," 3: Read Fuel Parsed",13," 4: Read Ra",0
+str09 BYTE "nge Parsed",13," 5: Check sync'ed time",13,0
+str10 BYTE "(r)ead, (w)rite, or (e)xit?",13,0
+str11 BYTE "Enter Address(0-500)",0
+str12 BYTE "Has Value: ",0
+str13 BYTE "Enter new value: ",0
+str14 BYTE "Done",13,0
+str15 BYTE "w=CD Up, s=CD Down d=Track+, a=Track- 1=vol-, 2=vol+",0
+str16 BYTE " q=stop Track",13,"r=Aux Mode, 3=Artist, 4= Album, ",0
+str17 BYTE "5=Track, 6=Genre",13,0
+str18 BYTE "Couldn't Mount SD Card!!",13,0
+str19 BYTE "Enter String and press enter to write text to ",0
+str20 BYTE "radio display",13,"Or hit enter to go back",0
+str21 BYTE "Entering:Data Log Mode",13,0
+str22 BYTE "Writing logfile Header",13,0
+str23 BYTE "Writing logfile Entry",13,0
+str24 BYTE "Entering: Connection Test Mode",13,0
+str25 BYTE "Not Found - Nothing",0
+str26 BYTE "Prev Track",0
+str27 BYTE "Next Track",0
+str28 BYTE "Prev CD",0
+str29 BYTE "Next CD",0
+str30 BYTE "Change CD to #",0
+str31 BYTE "Change Aux",0
+str32 BYTE "Time Text",0
+str33 BYTE "Fuel Text",0
+str34 BYTE "Range Text",0
+str35 BYTE "Date Text",0
+str36 BYTE "(Kracker Vol+)",0
+str37 BYTE "(Kracker Vol-)",0
+str38 BYTE "Artist Name",0
+str39 BYTE "Album Name",0
+str40 BYTE "Track Name",0
+str41 BYTE "Genre",0
+str42 BYTE "NA",0
+str43 BYTE "NA",0
+str44 BYTE "NA",0
+str45 BYTE "NA",0
+str46 BYTE "Entered AuxIn Only Mode",13,0
+str47 BYTE "Volume Set: ",0
+str48 BYTE "Running with Remapper",13,0
+str49 BYTE "Remaper disabled",13,0
+str50 BYTE "Nothing, CD Announce",13,0
+str51 BYTE "(CD Polled,Responded)",0
+str52 BYTE "(PowerDown,Stopped)",0
+str53 BYTE "(PowerUp,Stopped)",0
+str54 BYTE "Entering:Repeat Mode",13,0
+str55 BYTE "Entering:Remapper Mode",13,0
+str56 BYTE "Entering Music Mode",13,0
+str57 BYTE "s + addr to view messages sent BY addr",13,0
+str58 BYTE "d + addr to view messages sent TO addr",13,0
+str59 BYTE "'r' to remove most recently set filter.  Up to five",0
+str60 BYTE "active filters",13,0
+
   
 
 
@@ -307,8 +394,9 @@ debug.strin(@getorset)
 
 Pri EEPROM_set(addr,byteval)
 setLED(99)
+waitcnt(cnt + 300000)
 i2cObject.writeLocation(EEPROM_ADDR, addr+EEPROM_base, byteval, 16, 8)
-waitcnt(cnt + 200000)
+waitcnt(cnt + 300000)
 
 Pri EEPROM_Read(addr) | eepromdata
 setLED(199)
@@ -663,7 +751,7 @@ debug.str(gettextstring(60))
 updatestat~
 randctr~
 delay~
-
+displayrefresh := 15
           
 volset :=  EEPROM_read(byte[@radbutlist][8])                 ''Load Stored Preferences - dropdowns and Volume
 debug.str(gettextstring(47))
@@ -775,7 +863,7 @@ repeat
     kbus.sendcode(music.startplaycode)
     debug.str(string(13,"(endtrack),Next Track"))
 
-  IF time.oneshot(@delay, 15)
+  IF time.oneshot(@delay, displayrefresh)
     IF updatestat == TRUE 
       debug.str(string(13,"(Text Update),"))
       musiccmd(textfield)
@@ -811,9 +899,21 @@ case selectedaction
     ELSE
       settext(string("Aux Off"))
 
-  12 : kbus.localtime(@configbuffer)                    'local time
-       settext(@configbuffer)        
-       setupdate(selectedaction)
+  12 : IF NOT time.carissynced
+         kbus.localtime(@configbuffer)
+         settext(@configbuffer)
+       ELSE
+        case EEPROM_read(111)
+         1 :     settext(time.gettimetext(0, 0))  ' 24hr, no sec          
+                 setupdate(selectedaction)      
+         2     : settext(time.gettimetext(1, 1))  ' 12hr, with sec 
+                 setupdate(selectedaction)
+                 displayrefresh := 2
+         3     : settext(time.gettimetext(1, 0))    ' 24hr with sec
+                 setupdate(selectedaction)
+                 displayrefresh := 2       
+         OTHER : settext(time.gettimetext(0, 1))    ' 12hr, no sec
+                 setupdate(selectedaction)                
 
   13 : kbus.fuelaverage(@configbuffer)                  'AVG fuel str 38
        i := strsize(@configbuffer) 
@@ -854,6 +954,7 @@ case selectedaction
 PRI setupdate(field)
 updatestat := TRUE
 textfield := field
+displayrefresh := 15
 
 PUB DIAGNOSTICMODE 
 debug.stop
@@ -954,26 +1055,36 @@ Pri settext(strptr)
 ledtext := strptr
 
       
-PUB LEDnotifier  | switcher, i, delay
+PUB LEDnotifier  | switcher, i, delay, timeupdate
 {{Notification Options:
 23..20: Each LED    | 0:   All Off  |   1: Middle two |   2: Outer two
    199: Towards USB | 200: and back |  99: USB Away   | 100: And Back}}
 delay~
-time.start(12)
+timeupdate := 0
+time.start
 dira[23..16] := %1111_1111
 
 
 
 repeat
   time.wait(50)
-{
-  IF time.oneshot(@delay, 5)
-    IF kbus.localtime(@kmbreturn)
-      debug.str(@kmbreturn)
-      debug.newline
-      time.synctime(@kmbreturn)
-      delay~~
-}
+{  IF time.oneshot(@delay, 7)
+    IF timeupdate == 0
+     IF kbus.localtime(@kmbreturn)
+       debug.str(string("sync1"))
+       timeupdate := 1
+    ELSEif timeupdate == 1
+     If kbus.localtime(@kmbreturn2)
+        debug.str(string("sync2"))
+        If not strcomp(@kmbreturn, @kmbreturn2)
+         time.synctime(@kmbreturn2)        
+         debug.newline 
+         debug.str(time.gettimetext(1, 1)) 
+         debug.newline
+         delay~~
+         timeupdate := 3
+         debug.str(string("sync3"))
+}         
   IF LEDtext
      textscroll(LEDtext~)
 
@@ -1078,7 +1189,6 @@ return strptr
 Pri StrToBase(stringptr, base)
 return debug.strtobase(stringptr, base)
 
-
 Pri displaybuffer | i, x
 
 If debug.rxcount > 2
@@ -1145,12 +1255,12 @@ repeat i from 0 to BYTE[code + 1]  + 1
     debug.str(string(","))
   debug.char(32)         
 
-IF code <> kbus.codeptr  
-  debug.str(string(","))
-  debug.str(lookupmember(0))
-  debug.str(string(","))
-  debug.str(lookupmember(2))
-
+  
+debug.str(string(","))
+debug.str(lookupmember(0))
+debug.str(string(","))
+debug.str(lookupmember(2))
+ 
 PUB debugmode
 waitcnt(clkfreq  / 800 + cnt)
 repeat until debug.rxcheck  == -1
@@ -1245,30 +1355,199 @@ repeat
            next                                             
 
 
-PUB debugkmb  | i
+PUB debugkmb  
 repeat
   debug.clear
   debug.str(gettextstring(7))
   debug.str(gettextstring(8))
   debug.str(gettextstring(9))     
-    
-  i := debug.decin 
-  case i
+
+  case debug.decin
     0 : return
     1 : kbus.localtime(@configbuffer)
         debug.str(@configbuffer)
-    2 : kbus.date(@configbuffer)
-        debug.str(@configbuffer)
+    2 : kbus.date(@configbuffer)                                     
+        debug.str(@configbuffer)                                      
     3 : kbus.fuelaverage(@configbuffer)
         debug.str(@configbuffer)
     4 : kbus.estrange(@configbuffer)
         debug.str(@configbuffer)
     5 : If time.carissynced
-          debug.str(time.gettimetext)
+          debug.str(time.gettimetext(1, 1))
           debug.newline                    
         Else
           debug.str(string("Time not synced",13))               
+    6 : readdbus
   waitcnt(clkfreq + cnt)
+
+
+PUB readdbus  | i,x, y, end
+
+x~                 ' each byte in send code
+y := 3             ' return line for response code              
+
+debug.clear                       
+debug.str(string("Enter CMD, e to exit, s to send, n to enter next byte",13))
+                                                                                         '
+repeat
+  end := 0
+  debug.position(0,2)
+  debug.clearend
+  debug.position(0,2)           
+  x~ 
+  repeat until end == 1
+    i := debug.hexin
+    configbuffer[x++] := i
+    debug.hex(i,2)
+    debug.char(32)
+    case debug.charin
+     "e" : Return
+     "s" : debug.newline
+           i :=kbus.dbus(@configbuffer, 100)
+           x~
+           displaydbus(i)
+           end := 1
+
+
+{
+00 04 00 04 - read GM ident
+    00        10        A0       88        38         55       38        11         01       40        08         28       99         01       12        97 - response
+0000_0000 0001_0000 1010_0000 1000_1000 0011_1000 0101_0101 0011_1000 0001_0001 0000_0001 0100_0000 0000_1000 0010_1000 1001_1001 0000_0001 0001_0010 1001_0111 
+0000_0000 0010_0000 1000_0001 0100_0010 1000_0101 0101_0111 0000_1001 0001_0110 0010_1000 0001_1000 0011_0100 0110_0001 1000_1010 1010_0110 1000_0000 0001_0010 0010_1110
+    00        20        81       42        85         56       09        16         28       18        34         61       8A         A6       80        12     2E 
+        -        -
+    00        10        A0       88        38         55       38        11         01       40        08         28       99         01       12        97 - response
+00000000   0001000010100000 10001000 00111000 1010101                          00111000000100010000000101000000000010000010100010011001000000010001001010010111 
+00000000x x00100000xx100000010xx10000101xx00001010xx10101110xx00010010xx00101100xx01010000 00110000 01101000 1100001 1000101010100110 10000000 00010010 00101110
+  00        20        81      42       85       56       09       16       28       18       34       61       8A       A6       80        12     2E 
+
+
+}            
+
+
+PUB displaydbus(codeptr) | i, end 
+repeat
+  debug.hex(kbus.rx, 2)
+  debug.char(32)  
+
+{i~
+debug.positiony(y)
+debug.hex(BYTE[codeptr][i++], 2)
+debug.char(32)
+end := BYTE[codeptr][i] - 1
+
+repeat end
+  debug.hex(BYTE[codeptr][i++], 2)
+  debug.char(32)
+}
+
+   
+
+
+
+ 
+
+
+'                  4 faults                3 faults
+'Read Fault:       3F 04 D0 04 00 EF    3F 04 00 04 00 3F                                                                                         '
+'Response          D0 04 3F A0 04 4F    00 0C 3F A0 03 00 00 3D 03 29 02 30 09 BC                                                                                       '
+'Request Block1    3F 04 D0 04 01 EE    3F 04 00 04 01 3E                                                                                       '
+'Response          D0 22 3F A0 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 6D '
+
+
+' Service Information
+'80 03 D0 53 00 request
+'D0 10 80 54 46 50 66 98 90 07 F2 40 EC 00 00 00 11 24 ' Response
+'VIN FP66989; Total dist 203,400 kms [126,387 mls]; SI-L 2360 litres since last service; ; SI-T 17 days since last service
+
+{
+
+Diagnostics
+ 12  04  04  CK
+des len cmd
+00 Read Identity
+01 Write Identity
+02 Read AIS
+03 Write AIS
+04 Read Fault 80 ll 04 blk (select block
+05 Clear Fault
+06 Read memory                   
+07 Write memory                  
+08 Read coding data              
+09 Write coding data             
+0a Request coding data checksum  
+0b Read IO status                
+0c Set IO status                 
+0d Read system address           
+0e Read test stamp               
+0f Set test stamp                
+10 Clear memory             
+11 Read OS boot mode        
+12 Reset control unit       
+14 Read fault shadow memory 
+1b Read config data         
+1c Set config data          
+30 Self Test
+31 Download Test program
+32 Start Test
+33 Stop test program        
+34 HW manufacturer selftest                             
+40 Read adjustment value     
+41 Set adjustment value      
+42 Program adjustment value  
+43 Delete adaptive value     
+50 Program stepmotor address 
+51 Program stepmotor address 
+52 Delete stepmotor address  
+53 Read manufacturer data    
+54 Write manufacturer data   
+69 Read ZCS/FA
+80 Read crash telegram  
+81 Delete crash telegram
+90 Login
+9D Power down
+9f Terminate diagnostic mode
+
+RESPONSES
+
+SRC LEN cmd ck
+A0 Diagnostic command acknowledged
+A1 Diagnostic is busy
+A2 Diagnostic command rejected
+B0 Diagnostic parameter error
+B1 Diagnostic function error
+B2 Diagnostic coding error: incorrect coding data
+ff Command not acknowledged
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+DAT
+'                       rec 
+FaultReq BYTE $3F, $04, $00, $04, $00
+
+
 
 
 PUB loopaudio | i
@@ -1312,6 +1591,9 @@ repeat
           debug.str(music.fileptr)                  
   IF NOT music.nexttrack
     music.playtrack("c","n")
+
+
+    
 
 PRI showvalue(val)
 debug.str(string("Return"))    
@@ -1470,6 +1752,10 @@ milessuffix   BYTE " Miles",0
 'Config remap for bluetooth
 btmaplist     BYTE 121,123,125,127,133,131,129
 btxmitlist    BYTE 120,122,124,126,132,130,128
+
+
+
+
 
 
 {{

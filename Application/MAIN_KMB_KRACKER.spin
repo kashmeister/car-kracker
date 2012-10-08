@@ -1,5 +1,5 @@
 ''********************************************
-''*  Car Kracker Main, V0.60                 *
+''*  Car Kracker Main, V0.65                 *
 ''*  Author: Nick McClanahan (c) 2012        *
 ''*  See end of file for terms of use.       *
 ''********************************************
@@ -60,14 +60,14 @@ Removed: Nothing
 For Previous Releases, see Release_Notes.txt
 }
 DAT
-Version  BYTE "V",13,"0.60",13,0 
-version2 BYTE 16,"Kracker V 0.60",0
+Version  BYTE "V",13,"0.65",13,0 
+version2 BYTE 16,"Kracker V 0.65",0
 
 CON
   _clkmode = xtal1 + pll16x                             ' Crystal and PLL settings.
   _xinfreq = 5_000_000                                  ' 5 MHz crystal (5 MHz x 16 = 80 MHz).
-  Menudelay = 3
 
+  Menudelay = 3
   EEPROM_Addr   = %1010_0000   
   EEPROM_base   = $8000
   stack_base    = $7500
@@ -138,19 +138,18 @@ byte KMBreturn2[16]
 
 PUB Initialize
 'We use this method to dump running the main process in Cog 0
-ActiveDebugFilters := 0                                 
-kbus.Start(27, 26, %0010, 9600)
+ActiveDebugFilters := 0
+debug.StartRxTx(31, 30, %0000, 115_200, 0)  'added final value; 0 = enable debug term, anthing else = disable debug term                          
 coginit(maincog, main, stack_base)
-coginit(LEDcog, LEDnotifier, @stack)
-debug.StartRxTx(31, 30, %0000, 115_200)
- 
 cogstop(0)
 
 
 PUB main | i, c, delay
 i2cObject.Init(29, 28, false)
-
+coginit(LEDcog, LEDnotifier, @stack)  
+kbus.Start(27, 26, %0010, 9600)
 'Make sure debug filters are clear
+
 delay := 0
 
 IF EEPROM_read(101) <> 0
@@ -179,14 +178,17 @@ IF EEPROM_read(112) == 0
 
       %0100_0000 : COGSTOP(7)  
                    setLED(22)
+                   debug.stop    
                    DiagnosticMODE       'Diagnostic Mode for connecting PC
 
       %0010_0000 : COGSTOP(7)
-                   setLED(21)     
+                   setLED(21)
+                   debug.stop         
                    MusicMode            'Music Mode, start with a button
 
       %0001_0000 : COGSTOP(7)
                    setLED(20)
+                   debug.stop    
                    ConnectionTestMODE   'Test connection by blinking Clown Nose
 
   COGSTOP(7)
@@ -194,12 +196,24 @@ IF EEPROM_read(112) == 0
   Musicmode
 
 case EEPROM_read(101)
-  0 : DiagnosticMode
-  1 : MusicMode
-  2 : SerialRepeatMode
-  3 : RemapperMode
-  4 : DataLogMode
-  OTHER : Musicmode
+
+  0 : debug.stop    
+      DiagnosticMode
+
+  1 : debug.stop    
+      MusicMode
+
+  2 : debug.stop    
+      SerialRepeatMode
+
+  3 : debug.stop    
+      RemapperMode
+
+  4 : debug.stop    
+      DataLogMode
+
+  OTHER : debug.stop    
+          Musicmode
 
 
 
@@ -321,7 +335,7 @@ str02 BYTE " 1: Music",13," 2: SerialRepeat",13," 3: Remapper",13," 4: DataLog",
 str03 BYTE "Modes: (e to escape test)",13," 5: Hex Bus Sniffer",13," 6: CMD B",0
 str04 BYTE "last Bus Watch",13," 7: CMD Blast Single",13," 8: Audio Player",13," 9",0
 str05 BYTE ": Write text to Radio/NAV",13," 10: Read EEPROM",13," 11: Read E",0
-str06 BYTE "EPROM strings",13," 12: Read KMB values",13,0
+str06 BYTE "EPROM strings",13," 12: Read KMB values",13," 13: Dbus",13,0
 str07 BYTE "Read KMB",13," 0: Return to Main Debug",13," 1: Read Time Parsed",0
 str08 BYTE 13," 2: Read Date Parsed",13," 3: Read Fuel Parsed",13," 4: Read Ra",0
 str09 BYTE "nge Parsed",13," 5: Check sync'ed time",13,0
@@ -769,6 +783,7 @@ IF EEPROM_read(byte[@radbutlist][9]) == 1
 ELSE
   if \music.start(volset, EEPROM_read(144))
     debug.str(gettextstring(18))
+    
     repeat 
       setLED(201)   
       waitcnt(clkfreq + cnt)
@@ -858,19 +873,21 @@ repeat
        next
     IF remap
       remapcheck
+
   IF NOT music.nexttrack
     music.playtrack("c","n")
     kbus.sendcode(music.startplaycode)
     debug.str(string(13,"(endtrack),Next Track"))
-
+{
   IF time.oneshot(@delay, displayrefresh)
     IF updatestat == TRUE 
       debug.str(string(13,"(Text Update),"))
       musiccmd(textfield)
-
+}
 
 
 Pri musiccmd(selectedaction)    | i , x
+
 Case selectedaction
    0..4  :   debug.str(gettextstring(selectedaction + 25)) 
    5..10 :   debug.str(gettextstring(30))
@@ -926,6 +943,7 @@ case selectedaction
        Bytemove(@configbuffer + i , @milessuffix, 7)
        settext(@configbuffer)                       
        setupdate(selectedaction)                                            
+
         
   15 : kbus.date(@configbuffer)                         'date
        settext(@configbuffer)
@@ -957,7 +975,6 @@ textfield := field
 displayrefresh := 15
 
 PUB DIAGNOSTICMODE 
-debug.stop
 kbus.stop
 
 dira[30] := 1 'FTDI settings (tx = 30, rx = 31)
@@ -978,8 +995,6 @@ repeat
     kbus.clearcode     
     kbus.nextcode(100)
     displaybuffer
-
-  
 
 
 PUB REMAPPERMODE   | i,x,y, xmit 
@@ -1056,6 +1071,8 @@ ledtext := strptr
 
       
 PUB LEDnotifier  | switcher, i, delay, timeupdate
+
+
 {{Notification Options:
 23..20: Each LED    | 0:   All Off  |   1: Middle two |   2: Outer two
    199: Towards USB | 200: and back |  99: USB Away   | 100: And Back}}
@@ -1068,25 +1085,21 @@ dira[23..16] := %1111_1111
 
 repeat
   time.wait(50)
-{  IF time.oneshot(@delay, 7)
+  IF time.oneshot(@delay, 7)
     IF timeupdate == 0
      IF kbus.localtime(@kmbreturn)
-       debug.str(string("sync1"))
        timeupdate := 1
     ELSEif timeupdate == 1
      If kbus.localtime(@kmbreturn2)
-        debug.str(string("sync2"))
         If not strcomp(@kmbreturn, @kmbreturn2)
          time.synctime(@kmbreturn2)        
-         debug.newline 
-         debug.str(time.gettimetext(1, 1)) 
-         debug.newline
          delay~~
          timeupdate := 3
-         debug.str(string("sync3"))
-}         
+
+
   IF LEDtext
-     textscroll(LEDtext~)
+     textscroll(LEDtext)
+     LEDtext := 0
 
   case ~LEDctrl
      -1: outa[23..16] := %0000_0000
@@ -1189,9 +1202,9 @@ return strptr
 Pri StrToBase(stringptr, base)
 return debug.strtobase(stringptr, base)
 
-Pri displaybuffer | i, x
+Pri displaybuffer | i, x    
 
-If debug.rxcount > 2
+If debug.rxcount > 2         
   x := debug.rxcount
   repeat i from 1 to x 
     bufferdebugcmds[i - 1] := debug.rxcheck
@@ -1286,6 +1299,7 @@ repeat
     10 :loopeeprom
     11 :loopdebugstrings  
     12 : debugkmb
+    13 : readdbus
   waitcnt(clkfreq / 2 + cnt)
 
 PUB loopdebugstrings | i, x, y, strstart, offset, strcnt, strlen

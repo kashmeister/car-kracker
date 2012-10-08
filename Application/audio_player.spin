@@ -55,6 +55,7 @@ else
   DSPset := FALSE
 
 return \sd.mount_explicit(0, 1, 2, 3)
+
   
 
 PUB play(fileptr) | i
@@ -205,13 +206,20 @@ setup
         'setup output pins
         MOV DIRA, DMask
         MOVS ctra, #5   'Set A PIN
+        nop
         MOVD ctra, #7   'Set B PIN
+        nop
+        MOVI ctra, ctrmode 
+        nop
 
         MOVS ctrb, #4    'Set A PIN  
+        nop
         MOVD ctrb, #6    'Set B pin
+        nop
+        MOVI ctrb, ctrmode
 
-        MOVI ctra, ctrmode
-        MOVI ctrb, ctrmode                
+
+                
 
         'Wait for SPIN to fill table
         MOV WaitCount, CNT
@@ -253,9 +261,9 @@ MainLoop
         
 
         waitcnt WaitCount,dRate    
-        MOV FRQA,Right
-        MOV FRQB,Right
-
+        MOV FRQB,right
+        MOV FRQA,left
+        
         WRLONG Zero,pData
         ADD pData,#4
 
@@ -298,27 +306,21 @@ WaitCount long 0
 pData   long 0
 LoopCount long 0
 SizeBuff long buffsize
-'Left    long 0
+
 Right   long 0
 Left    long 0
 Zero    long 0
 fadeperiod     long 100_000
 fade    long  0         
 
-DMask   LONG %1111 << 4
-
+DMask   LONG %0000_0000_0000_0000_0000_0000_1111_0000
+'                     8        16        24        32'
 
 'setup parameters
-DMaskR  long 0 'right output mask
-OPinR   long 16 'right channel output pin #                        '   <---------  Change Right pin# here !!!!!!!!!!!!!!
-
-    
-DMaskL  long 0 'left output mask 
-OPinL   long 24 'left channel output pin #                         '   <---------  Change Left pin# here !!!!!!!!!!!!!!    
 
 '            31  ctr  pll       
- CTRmode LONG %0_00111_000
-'CTRmode LONG %0_00110_000 Original
+CTRmode LONG %0_00111_000 'differential
+'CTRmode LONG %0_00110_000 '  Original
 
 
 

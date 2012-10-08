@@ -43,8 +43,8 @@ totalseconds~
 timestamprefresh~
 carsyncstatus~
 
-
-ctra := %00110_000 << 23 + 31 << 9 + 31 'Establish mode duty
+dira[0]~  
+ctra := %00110_000 << 23 + 0 << 9 + 0 'Establish mode duty
 frqa := multiplier 
 systemtimer := 0
 refreshcheck

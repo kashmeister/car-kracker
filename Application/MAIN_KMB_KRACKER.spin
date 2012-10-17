@@ -1,22 +1,35 @@
 ''********************************************
-''*  Car Kracker Main, V0.65                 *
+''*  Car Kracker Main, V0.66                 *
 ''*  Author: Nick McClanahan (c) 2012        *
 ''*  See end of file for terms of use.       *
 ''********************************************
 
 {-----------------REVISION HISTORY-----------------
   For complete usage and version history, see Release_Notes.txt
-0.60  Strings moved back to program memory.  Added differential audio
+0.66     Temp removed Time sync
+         Changed timing to 9700bps - improves compatability
+         - Major revisions to KbusCore - see Object file for full notes
 
-0.59  Strings are now stored in upper EEPROM.  Kustomizer .59 will populate the strings, or use string_updater
-      Bugfixes on KbusCore, Padding now works
-      New Time engine 
+New:     Basic DBUS support
 
-0.58  Added WAV Riff tag support
-      Added DSP support (set in Kustomizer)
-      Added Remapping within music mode
-      Added Textscroll
-      Added Prev / Next Support
+0.65     Fixed USB bug - USB now shuts down after entering a non-config or non USB necessary mode.
+           To run music, repeater, or other modes with USB serial support, enter Debug mode on bootup
+         Added support for '-' separator in audio filenames
+
+New:     Time sync
+           Kracker now syncs with the car clock.      
+
+0.60     Strings moved back to program memory.  Added differential audio
+
+0.59     Strings are now stored in upper EEPROM.  Kustomizer .59 will populate the strings, or use string_updater
+         Bugfixes on KbusCore, Padding now works
+         New Time engine 
+
+0.58     Added WAV Riff tag support
+         Added DSP support (set in Kustomizer)
+         Added Remapping within music mode
+         Added Textscroll
+         Added Prev / Next Support
 
 0.57: Added Text Display to RAD/NAV
       Improved EEPROM reading reliability
@@ -60,8 +73,8 @@ Removed: Nothing
 For Previous Releases, see Release_Notes.txt
 }
 DAT
-Version  BYTE "V",13,"0.65",13,0 
-version2 BYTE 16,"Kracker V 0.65",0
+Version  BYTE "V",13,"0.66",13,0 
+version2 BYTE 16,"Kracker V 0.66",0
 
 CON
   _clkmode = xtal1 + pll16x                             ' Crystal and PLL settings.
@@ -147,13 +160,14 @@ cogstop(0)
 PUB main | i, c, delay
 i2cObject.Init(29, 28, false)
 coginit(LEDcog, LEDnotifier, @stack)  
-kbus.Start(27, 26, %0010, 9600)
+'           RX  TX 
+kbus.Start(27, 26, %0010, 9700)
+
+
 'Make sure debug filters are clear
 
 delay := 0
-
-IF EEPROM_read(101) <> 0
-  debug.str(string("Hit d key for debug",13))
+debug.str(string("Hit d key for debug",13))
 
 repeat until time.oneshot(@delay, 5)
   setled(1)
@@ -240,6 +254,9 @@ repeat
   IF strcomp(@configbuffer, @sermon)
     serialmonitormode
 
+  IF strcomp(@configbuffer, @dmon)
+    dbusmonitormode
+
   IF strcomp(@configbuffer, @loadstrings)
     loadtextstrings
     
@@ -264,7 +281,48 @@ serdone       Byte "serdone",0
 default       Byte "default",0
 modesel       BYTE "m",0
 loadstrings   BYTE "loadstrings",0   
-        
+dmon          BYTE "dmonitor",0
+
+
+
+PUB dbusmonitormode | i, stopflag, len
+
+i := 0
+stopflag := 0
+
+ 
+
+repeat
+  IF kbus.nextDcode(50)
+    setLED (199)
+    len := BYTE[kbus.codeptr + 1] -1
+    repeat i from 0 to len
+      debug.hex(BYTE[kbus.codeptr + i], 2)
+      debug.char(32)
+    next
+    
+  IF debug.rxcount > 0
+    debug.strin(@configbuffer)
+    IF strcomp(@configbuffer, @seroff)
+      return
+
+    IF strcomp(@configbuffer, @sersend)
+      setLED (99)
+      bytefill(@bussendvalue, 0, 20)
+      stopflag := 0
+      i := 0 
+
+      repeat while stopflag == 0
+        debug.strin(@configbuffer)
+        IF strcomp(@configbuffer, @serdone)     
+          bussendvalue[1] := i
+          codetostring(@bussendvalue)
+          kbus.sendKcode(@bussendvalue)
+          stopflag := 1    
+        ELSE
+          bussendvalue[i] := debug.hexin
+          i++
+
 
 
 PUB loadtextstrings | i, x, y, strstart, offset, strlen, strcnt
@@ -334,8 +392,8 @@ str01 BYTE 13,"DEBUG MENU",13,"Main Modes:",13," 0: Diagnostic",13,0
 str02 BYTE " 1: Music",13," 2: SerialRepeat",13," 3: Remapper",13," 4: DataLog",13,"Test",0
 str03 BYTE "Modes: (e to escape test)",13," 5: Hex Bus Sniffer",13," 6: CMD B",0
 str04 BYTE "last Bus Watch",13," 7: CMD Blast Single",13," 8: Audio Player",13," 9",0
-str05 BYTE ": Write text to Radio/NAV",13," 10: Read EEPROM",13," 11: Read E",0
-str06 BYTE "EPROM strings",13," 12: Read KMB values",13," 13: Dbus",13,0
+str05 BYTE ": Write text to Radio/NAV",13," 10: Read EEPROM",13," 11: Read EEPROM Strin",0
+str06 BYTE "gs",13," 12: Read KMB",13," 13: Dbus Xmit",13," 14: Dbus sniffer",13,0
 str07 BYTE "Read KMB",13," 0: Return to Main Debug",13," 1: Read Time Parsed",0
 str08 BYTE 13," 2: Read Date Parsed",13," 3: Read Fuel Parsed",13," 4: Read Ra",0
 str09 BYTE "nge Parsed",13," 5: Check sync'ed time",13,0
@@ -467,7 +525,7 @@ nextupdate := 0
 
 
 repeat
-  IF kbus.nextcode(50)
+  IF kbus.nextKcode(50)
     setLED (200)
     If loggeditems[1] == 1
       passiveupdate(kbus.speed, @speed)
@@ -627,7 +685,7 @@ i := 0
 stopflag := 0
 
 repeat
-  IF kbus.nextcode(50)
+  IF kbus.nextKcode(50)
     setLED (199)
     repeat i from 0 to BYTE[kbus.codeptr + 1]
       debug.hex(BYTE[kbus.codeptr + i],2)
@@ -655,7 +713,7 @@ repeat
         IF strcomp(@configbuffer, @serdone)     
           bussendvalue[1] := i -1
           codetostring(@bussendvalue)
-          kbus.sendcode(@bussendvalue)
+          kbus.sendKcode(@bussendvalue)
           stopflag := 1    
         ELSE
           bussendvalue[i] := debug.hexin
@@ -704,12 +762,12 @@ sndunk       BYTE " ",0                'unidentified
 
     
 PUB configblast(cmd) | selected
-kbus.sendcode(@@CMDLIST[cmd])
+kbus.sendKcode(@@CMDLIST[cmd])
 
 'Some commands need a second message
  case cmd
-   2       :  kbus.sendcode(@whlplusup)                     
-   3       :  kbus.sendcode(@whlminup)
+   2       :  kbus.sendKcode(@whlplusup)                    
+   3       :  kbus.sendKcode(@whlminup)
 SetLED(100)  
 
 DAT 'List of Commands to Blast
@@ -727,7 +785,7 @@ debug.str(gettextstring(24))
 
 repeat
   SetLED(100)
-  kbus.sendcode(@clownnose)
+  kbus.sendKcode(@clownnose)
   waitcnt(clkfreq * 5 + cnt)
 
 
@@ -798,53 +856,53 @@ ELSE
   remap := FALSE
   debug.str(gettextstring(49))
 
-kbus.sendcode(@CDAnnounce)
+kbus.sendKcode(@CDAnnounce)
 debug.str(gettextstring(50))
 
 
 repeat
      kbus.clearcode
-     i := kbus.nextcode(50)
+     i := kbus.nextKcode(50)
      displaybuffer
   IF i 
-    IF kbus.codecompare(@pollCD)
-       kbus.sendcode(@CDRespond)
+    IF kbus.KCodeCompare(@pollCD)
+       kbus.sendKcode(@CDRespond)
        repeat until NOT kbus.txcheck
        displaybuffercode(@CDrespond)
        debug.str(gettextstring(51))  
        next
 
-    IF kbus.codecompare(@IKEoff)
+    IF kbus.KCodeCompare(@IKEoff)
        debug.str(gettextstring(52)) 
        remapTel := 0    
        music.stopplaying  
        next
 
-    If kbus.codecompare(@IKEon)
+    If kbus.KCodeCompare(@IKEon)
        debug.str(gettextstring(53)) 
        next
      
-    IF kbus.codecompare(@cdstatusreq)
+    IF kbus.KCodeCompare(@cdstatusreq)
        debug.str(string("(Status Request,"))
        IF music.inPlaymode
-         kbus.sendcode(music.PlayingCode)
+         kbus.sendKcode(music.PlayingCode)
          displaybuffercode(music.playingcode)
          debug.str(string(",Status Playing)"))
        ELSE
-         kbus.sendcode(music.notplaycode)
+         kbus.sendKcode(music.notplaycode)
          displaybuffercode(music.notplaycode)
          debug.str(string(",Status Not Playing)"))        
        next
 
-    IF kbus.codecompare(@playtrack)
-       kbus.sendcode(music.StartPlayCode)
+    IF kbus.KCodeCompare(@playtrack)
+       kbus.sendKcode(music.StartPlayCode)
        displaybuffercode(music.StartPlayCode)
        debug.str(string("(Play Start,Begin Playing)"))                                    
        music.playtrack("c","c") 
        next
      
-    IF kbus.codecompare(@stoptrack)
-       kbus.sendcode(music.TrackEndCode)
+    IF kbus.KCodeCompare(@stoptrack)
+       kbus.sendKcode(music.TrackEndCode)
        displaybuffercode(music.TrackEndCode)
        music.stopplaying
        debug.str(string("Stop Track,Nothing"))
@@ -867,7 +925,7 @@ repeat
          musiccmd(radioremaps[7])
        next
 
-    IF kbus.codecompare(@nobuttons)
+    IF kbus.KCodeCompare(@nobuttons)
        debug.str(string("exit text disp,Nothing"))
        updatestat := false
        next
@@ -876,7 +934,7 @@ repeat
 
   IF NOT music.nexttrack
     music.playtrack("c","n")
-    kbus.sendcode(music.startplaycode)
+    kbus.sendKcode(music.startplaycode)
     debug.str(string(13,"(endtrack),Next Track"))
 {
   IF time.oneshot(@delay, displayrefresh)
@@ -898,16 +956,16 @@ case selectedaction
   2 : music.playtrack("c", "n")
 
   3 : music.playtrack("p", 1)
-      kbus.sendcode(music.StartPlayCode)  
+      kbus.sendKcode(music.StartPlayCode) 
       displaybuffercode(music.StartPlayCode)
 
   4 : music.playtrack("n", 1)
-      kbus.sendcode(music.StartPlayCode)
+      kbus.sendKcode(music.StartPlayCode)
       displaybuffercode(music.StartPlayCode)     
 
   5..10 :  music.playtrack(selectedaction -4, 1)
            debug.dec(selectedaction - 4)
-           kbus.sendcode(music.StartPlayCode)
+           kbus.sendKcode(music.StartPlayCode)
            displaybuffercode(music.StartPlayCode)     
 
   11 :                 
@@ -993,7 +1051,7 @@ setLED(205)
 
 repeat
     kbus.clearcode     
-    kbus.nextcode(100)
+    kbus.nextKcode(100)
     displaybuffer
 
 
@@ -1006,8 +1064,8 @@ remappersetup
 
 repeat
     kbus.clearcode
-    kbus.nextcode(0)
-    If kbus.codecompare(@IKEon) 
+    kbus.nextKcode(0)
+    If kbus.KCodeCompare(@IKEon)
       remaptel := 0
     setLED(199)  
     remapcheck
@@ -1026,15 +1084,15 @@ repeat i from 0 to 5
 pri remapcheck | y, delay
 
 
-IF kbus.codecompare(@RTButton)   
+IF kbus.KCodeCompare(@RTButton)  
  IF remaptel < 3
   remaptel++
   return
     
 repeat y from 0 to 5                              
   IF triggeritems[y] < 250  
-    IF kbus.codecompare(@@maptrg[triggeritems[y]-1]) 'triggeritems[y] is the dropdown value.  First dropdown field value is 'none' = 0
-       kbus.sendcode(@@mapxmit[xmititems[y]-1])       
+    IF kbus.KCodeCompare(@@maptrg[triggeritems[y]-1]) 'triggeritems[y] is the dropdown value. First dropdown field value is 'none' = 0
+       kbus.sendKcode(@@mapxmit[xmititems[y]-1])      
        displaybuffercode(@@mapxmit[xmititems[y]-1])
        debug.str(string(" REMAP,"))  
        debug.char(triggeritems[y] + $30)
@@ -1085,6 +1143,7 @@ dira[23..16] := %1111_1111
 
 repeat
   time.wait(50)
+{
   IF time.oneshot(@delay, 7)
     IF timeupdate == 0
      IF kbus.localtime(@kmbreturn)
@@ -1095,13 +1154,13 @@ repeat
          time.synctime(@kmbreturn2)        
          delay~~
          timeupdate := 3
-
+}
 
   IF LEDtext
      textscroll(LEDtext)
      LEDtext := 0
 
-  case ~LEDctrl
+  case LEDctrl
      -1: outa[23..16] := %0000_0000
      1 : outa[23..16] := %0110_0000
      2 : outa[23..16] := %1001_0000
@@ -1157,7 +1216,7 @@ ELSE
   repeat strlen - radsize
     kbus.sendtext(++strptr)
     time.wait(300)
-    IF kbus.codecompare(@nobuttons)
+    IF kbus.KCodeCompare(@nobuttons)
       return
 return
 
@@ -1300,7 +1359,11 @@ repeat
     11 :loopdebugstrings  
     12 : debugkmb
     13 : readdbus
+    14 : Loopdbussniff
   waitcnt(clkfreq / 2 + cnt)
+
+
+
 
 PUB loopdebugstrings | i, x, y, strstart, offset, strcnt, strlen
 strstart := 600    
@@ -1417,46 +1480,34 @@ repeat
     case debug.charin
      "e" : Return
      "s" : debug.newline
-           i :=kbus.dbus(@configbuffer, 100)
-           x~
-           displaydbus(i)
-           end := 1
+           kbus.sendDcode(@configbuffer)
+           kbus.NextDcode(200)
+           displaydbus
+           waitcnt(clkfreq * 3 + cnt)
+           return
 
 
-{
-00 04 00 04 - read GM ident
-    00        10        A0       88        38         55       38        11         01       40        08         28       99         01       12        97 - response
-0000_0000 0001_0000 1010_0000 1000_1000 0011_1000 0101_0101 0011_1000 0001_0001 0000_0001 0100_0000 0000_1000 0010_1000 1001_1001 0000_0001 0001_0010 1001_0111 
-0000_0000 0010_0000 1000_0001 0100_0010 1000_0101 0101_0111 0000_1001 0001_0110 0010_1000 0001_1000 0011_0100 0110_0001 1000_1010 1010_0110 1000_0000 0001_0010 0010_1110
-    00        20        81       42        85         56       09        16         28       18        34         61       8A         A6       80        12     2E 
-        -        -
-    00        10        A0       88        38         55       38        11         01       40        08         28       99         01       12        97 - response
-00000000   0001000010100000 10001000 00111000 1010101                          00111000000100010000000101000000000010000010100010011001000000010001001010010111 
-00000000x x00100000xx100000010xx10000101xx00001010xx10101110xx00010010xx00101100xx01010000 00110000 01101000 1100001 1000101010100110 10000000 00010010 00101110
-  00        20        81      42       85       56       09       16       28       18       34       61       8A       A6       80        12     2E 
+PUB Loopdbussniff
+debug.clear
 
-
-}            
-
-
-PUB displaydbus(codeptr) | i, end 
 repeat
-  debug.hex(kbus.rx, 2)
+    kbus.clearcode     
+    If kbus.nextDcode(100)
+      displaydbus
+
+PUB displaydbus | len, i
+
+len := BYTE[kbus.codeptr + 1] -1 
+
+
+repeat i from 0 to len
+  debug.str(string("$"))
+  debug.hex(BYTE[kbus.codeptr + i], 2)
+  debug.str(string(","))
   debug.char(32)  
-
-{i~
-debug.positiony(y)
-debug.hex(BYTE[codeptr][i++], 2)
-debug.char(32)
-end := BYTE[codeptr][i] - 1
-
-repeat end
-  debug.hex(BYTE[codeptr][i++], 2)
-  debug.char(32)
-}
+debug.newline
 
    
-
 
 
  
@@ -1473,86 +1524,6 @@ repeat end
 '80 03 D0 53 00 request
 'D0 10 80 54 46 50 66 98 90 07 F2 40 EC 00 00 00 11 24 ' Response
 'VIN FP66989; Total dist 203,400 kms [126,387 mls]; SI-L 2360 litres since last service; ; SI-T 17 days since last service
-
-{
-
-Diagnostics
- 12  04  04  CK
-des len cmd
-00 Read Identity
-01 Write Identity
-02 Read AIS
-03 Write AIS
-04 Read Fault 80 ll 04 blk (select block
-05 Clear Fault
-06 Read memory                   
-07 Write memory                  
-08 Read coding data              
-09 Write coding data             
-0a Request coding data checksum  
-0b Read IO status                
-0c Set IO status                 
-0d Read system address           
-0e Read test stamp               
-0f Set test stamp                
-10 Clear memory             
-11 Read OS boot mode        
-12 Reset control unit       
-14 Read fault shadow memory 
-1b Read config data         
-1c Set config data          
-30 Self Test
-31 Download Test program
-32 Start Test
-33 Stop test program        
-34 HW manufacturer selftest                             
-40 Read adjustment value     
-41 Set adjustment value      
-42 Program adjustment value  
-43 Delete adaptive value     
-50 Program stepmotor address 
-51 Program stepmotor address 
-52 Delete stepmotor address  
-53 Read manufacturer data    
-54 Write manufacturer data   
-69 Read ZCS/FA
-80 Read crash telegram  
-81 Delete crash telegram
-90 Login
-9D Power down
-9f Terminate diagnostic mode
-
-RESPONSES
-
-SRC LEN cmd ck
-A0 Diagnostic command acknowledged
-A1 Diagnostic is busy
-A2 Diagnostic command rejected
-B0 Diagnostic parameter error
-B1 Diagnostic function error
-B2 Diagnostic coding error: incorrect coding data
-ff Command not acknowledged
-
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1577,7 +1548,7 @@ if \music.start(1, 0)
 
 
 
- 
+
 repeat
   case debug.rxcheck
     "e" : music.stop
@@ -1668,6 +1639,14 @@ ELSEIF option == 2
                                          
 
 DAT
+
+
+'DBUS cmds
+        dvolup       BYTE   $68, $05, $0C, $05 
+        dvoldn       BYTE   $68, $05, $0C, $06
+        dgalup       BYTE   $68, $05, $0C, $40
+        dgaldn       BYTE   $68, $05, $0C, $20
+        
 
 'STEERING WHEEL
         volup        BYTE $50, $04, $68, $32, $11

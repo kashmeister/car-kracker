@@ -1,9 +1,11 @@
 ''********************************************
-''*  Audio Core 1.1                          *
+''*  Audio Core 1.2                          *
 ''*  Author: Nick McClanahan (c) 2012        *
 ''*  See end of file for terms of use.       *
 ''********************************************
 {-----------------REVISION HISTORY-----------------
+1.2 - Fixed audio playback bugs - L channel was being played on both L and R
+
 1.1 - RIFF Support
 Now supports audio metadata in WAV files.
 Now supports SPDIF output (pin 14)
@@ -310,8 +312,6 @@ SizeBuff long buffsize
 Right   long 0
 Left    long 0
 Zero    long 0
-fadeperiod     long 100_000
-fade    long  0         
 
 DMask   LONG %0000_0000_0000_0000_0000_0000_1111_0000
 '                     8        16        24        32'
